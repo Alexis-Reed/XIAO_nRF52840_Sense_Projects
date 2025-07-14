@@ -83,13 +83,11 @@ void setup()
 }
 
 // ───────────────────────────────── Loop ───────────────────────────────
-void loop()
-{
+void loop() {
   uint32_t now = micros();
-  if (now - lastSampleTimeUs >= SAMPLE_INTERVAL_US) {
+  if ((now - lastSampleTimeUs) >= SAMPLE_INTERVAL_US) {
     lastSampleTimeUs = now;
 
-    // ── Grab raw data ──
     imuSample.ax = myIMU.readFloatAccelX();
     imuSample.ay = myIMU.readFloatAccelY();
     imuSample.az = myIMU.readFloatAccelZ();
@@ -98,12 +96,18 @@ void loop()
     imuSample.gy = myIMU.readFloatGyroY();
     imuSample.gz = myIMU.readFloatGyroZ();
 
-    // ── BLE push only if there’s a central and notifications are on ──
+    // Print to Serial to confirm values
+    Serial.print(imuSample.ax); Serial.print(", ");
+    Serial.print(imuSample.ay); Serial.print(", ");
+    Serial.print(imuSample.az); Serial.print(", ");
+    Serial.print(imuSample.gx); Serial.print(", ");
+    Serial.print(imuSample.gy); Serial.print(", ");
+    Serial.println(imuSample.gz);
+
+    // Send to BLE only if connected and notify is enabled
     if (bleuart.notifyEnabled()) {
       bleuart.write((uint8_t*)&imuSample, sizeof(imuSample));
+      Serial.println("Sent over BLE");
     }
-
-    // quick visual heartbeat
-    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
   }
 }
