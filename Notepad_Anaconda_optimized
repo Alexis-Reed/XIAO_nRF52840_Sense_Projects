@@ -1,0 +1,47 @@
+import sys, serial, numpy as np, pyqtgraph as pg
+from pyqtgraph.Qt import QtWidgets, QtCore
+
+# ─── Serial ───
+PORT = 'COM4'        # ← change me to your correct COM port
+BAUD = 115200
+ser = serial.Serial(PORT, BAUD, timeout=1)
+
+# ─── PyQtGraph Window ───
+app = QtWidgets.QApplication([])
+win = pg.GraphicsLayoutWidget(show=True, title="Real‑Time IMU Plot")
+win.resize(1000, 600)
+labels = ['ax', 'ay', 'az', 'gx', 'gy', 'gz']
+plots, curves, data = [], [], [np.zeros(500) for _ in range(6)]
+
+for i, lab in enumerate(labels):
+    p = win.addPlot(title=lab)
+    c = p.plot(pen=pg.intColor(i))
+    plots.append(p); curves.append(c)
+    if i % 3 == 2: win.nextRow()
+
+BATCH_SIZE = 300
+buffer = []
+
+def update():
+    global buffer, data
+
+    while ser.in_waiting:
+        line = ser.readline().decode('utf-8').strip()
+        try:
+            values = list(map(float, line.split(',')))
+            if len(values) == 6:
+                buffer.append(values)
+        except ValueError:
+            continue
+
+    if len(buffer) >= BATCH_SIZE:
+        batch = buffer[:BATCH_SIZE]
+        buffer = buffer[BATCH_SIZE:]
+
+        # Transpose to split each column
+        cols = list(zip(*batch))  # [ax_list, ay_list, ..., gz_list]
+        for i in range(6):
+            # Shift left and append new batch
+            data[i] = np.roll(data[i], -BATCH_SIZE)
+            data[i][-BATCH_SIZE:] = cols[i]
+            curves[i].setData(data[i])
