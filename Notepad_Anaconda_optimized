@@ -6,7 +6,7 @@ from pyqtgraph.Qt import QtWidgets, QtCore
 import time
 
 # ─── Serial Port Setup ───
-PORT = 'COM4'  # ← Replace this with your actual COM port
+PORT = 'COM4'  # ← Change this to your actual COM port
 BAUD = 115200
 ser = serial.Serial(PORT, BAUD, timeout=1)
 
@@ -29,6 +29,13 @@ for i, label in enumerate(labels):
 # ─── Data Buffering ───
 BATCH_SIZE = 300
 buffer = []
+save_to_file = True
+output_file = "imu_data_log.csv"
+
+# ─── Prepare Output File ───
+if save_to_file:
+    with open(output_file, 'w') as f:
+        f.write("ax,ay,az,gx,gy,gz\n")
 
 def update():
     global buffer, data, last_time
@@ -52,7 +59,13 @@ def update():
             data[i][-BATCH_SIZE:] = cols[i]
             curves[i].setData(data[i])
 
-        # Timing debug (optional)
+        # Save to CSV
+        if save_to_file:
+            with open(output_file, 'a') as f:
+                for row in batch:
+                    f.write(",".join(map(str, row)) + "\n")
+
+        # Print timing info
         now = time.time()
         if 'last_time' in globals():
             print(f"BATCH RECEIVED: {now - last_time:.3f} s")
