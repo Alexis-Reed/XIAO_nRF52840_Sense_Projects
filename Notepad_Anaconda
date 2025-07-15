@@ -1,13 +1,13 @@
 import sys, serial, numpy as np, pyqtgraph as pg
-from pyqtgraph.Qt import QtGui, QtCore
+from pyqtgraph.Qt import QtWidgets, QtCore
 
 # ─── Serial ───
-PORT = 'COM4'        # ← change me
+PORT = 'COM4'        # ← change me to your correct COM port
 BAUD = 115200
 ser = serial.Serial(PORT, BAUD, timeout=1)
 
 # ─── PyQtGraph Window ───
-app = QtGui.QApplication([])
+app = QtWidgets.QApplication([])
 win = pg.GraphicsLayoutWidget(show=True, title="Real‑Time IMU Plot")
 win.resize(1000, 600)
 labels = ['ax', 'ay', 'az', 'gx', 'gy', 'gz']
@@ -24,11 +24,11 @@ def update():
     try:
         ax, ay, az, gx, gy, gz = map(float, line.split(','))
         for arr, val, cur in zip(data, (ax, ay, az, gx, gy, gz), curves):
-            arr[:-1] = arr[1:]      # shift left
-            arr[-1] = val           # add new at end
+            arr[:-1] = arr[1:]
+            arr[-1] = val
             cur.setData(arr)
     except ValueError:
         pass  # skip bad lines
 
 timer = QtCore.QTimer(); timer.timeout.connect(update); timer.start(1)
-QtGui.QApplication.instance().exec_()
+QtWidgets.QApplication.instance().exec_()
