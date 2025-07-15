@@ -1,29 +1,37 @@
-import sys, serial, numpy as np, pyqtgraph as pg
+import sys
+import serial
+import numpy as np
+import pyqtgraph as pg
 from pyqtgraph.Qt import QtWidgets, QtCore
+import time
 
-# ─── Serial ───
-PORT = 'COM4'        # ← change me to your correct COM port
+# ─── Serial Port Setup ───
+PORT = 'COM4'  # ← Replace this with your actual COM port
 BAUD = 115200
 ser = serial.Serial(PORT, BAUD, timeout=1)
 
-# ─── PyQtGraph Window ───
+# ─── PyQtGraph Setup ───
 app = QtWidgets.QApplication([])
-win = pg.GraphicsLayoutWidget(show=True, title="Real‑Time IMU Plot")
+win = pg.GraphicsLayoutWidget(show=True, title="Real-Time IMU Plot")
 win.resize(1000, 600)
 labels = ['ax', 'ay', 'az', 'gx', 'gy', 'gz']
-plots, curves, data = [], [], [np.zeros(500) for _ in range(6)]
+plots, curves = [], []
+data = [np.zeros(3000) for _ in range(6)]  # 10 batches of 300 samples = 3000 points
 
-for i, lab in enumerate(labels):
-    p = win.addPlot(title=lab)
+for i, label in enumerate(labels):
+    p = win.addPlot(title=label)
     c = p.plot(pen=pg.intColor(i))
-    plots.append(p); curves.append(c)
-    if i % 3 == 2: win.nextRow()
+    plots.append(p)
+    curves.append(c)
+    if i % 3 == 2:
+        win.nextRow()
 
+# ─── Data Buffering ───
 BATCH_SIZE = 300
 buffer = []
 
 def update():
-    global buffer, data
+    global buffer, data, last_time
 
     while ser.in_waiting:
         line = ser.readline().decode('utf-8').strip()
@@ -38,10 +46,22 @@ def update():
         batch = buffer[:BATCH_SIZE]
         buffer = buffer[BATCH_SIZE:]
 
-        # Transpose to split each column
-        cols = list(zip(*batch))  # [ax_list, ay_list, ..., gz_list]
+        cols = list(zip(*batch))  # Transpose: [ax_list, ay_list, ..., gz_list]
         for i in range(6):
-            # Shift left and append new batch
             data[i] = np.roll(data[i], -BATCH_SIZE)
             data[i][-BATCH_SIZE:] = cols[i]
             curves[i].setData(data[i])
+
+        # Timing debug (optional)
+        now = time.time()
+        if 'last_time' in globals():
+            print(f"BATCH RECEIVED: {now - last_time:.3f} s")
+        last_time = now
+
+# ─── Start the Timer Loop ───
+timer = QtCore.QTimer()
+timer.timeout.connect(update)
+timer.start(1)
+
+# ─── Launch GUI ───
+QtWidgets.QApplication.instance().exec_()
