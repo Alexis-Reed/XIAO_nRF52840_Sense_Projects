@@ -1,0 +1,61 @@
+#include <Wire.h>
+#include "LSM6DS3.h"
+
+// Create IMU object (not heavily used for reading, but for init)
+LSM6DS3 imu(I2C_MODE, 0x6A);
+
+unsigned long lastRatePrint = 0;
+unsigned long sampleCount = 0;
+
+void setup() {
+  Serial.begin(921600);
+  while (!Serial);  // Wait for Serial to connect
+
+  Wire.begin();
+  Wire.setClock(1000000);  // Set I2C speed to 1 MHz
+
+  if (imu.begin() != 0) {
+    Serial.println("Failed to initialize IMU!");
+    while (1);  // Halt if IMU init fails
+  }
+
+  // Configure accelerometer: 3.33 kHz, ±2g, BW = 400 Hz
+  imu.writeRegister(LSM6DS3_ACC_GYRO_CTRL1_XL, 0b11000000);
+  // Configure gyroscope: 3.33 kHz, ±245 dps
+  imu.writeRegister(LSM6DS3_ACC_GYRO_CTRL2_G,  0b11000000);
+
+  Serial.println("IMU initialized.");
+}
+
+void loop() {
+  int16_t ax, ay, az, gx, gy, gz;
+
+
+  // Burst read starting at OUTX_L_XL
+  Wire.beginTransmission(0x6A);  // Hardcode IMU I2C address
+  Wire.write(0x80 | LSM6DS3_ACC_GYRO_OUTX_L_XL);  // Auto-increment starting register
+  Wire.endTransmission(false);
+  Wire.requestFrom(0x6A, 12, true);
+
+  // Read accel + gyro raw data
+  ax = Wire.read() | (Wire.read() << 8);
+  ay = Wire.read() | (Wire.read() << 8);
+  az = Wire.read() | (Wire.read() << 8);
+  gx = Wire.read() | (Wire.read() << 8);
+  gy = Wire.read() | (Wire.read() << 8);
+  gz = Wire.read() | (Wire.read() << 8);
+
+  sampleCount++;
+
+  // Print frequency once per second
+  unsigned long now = millis();
+  if (now - lastRatePrint >= 1000) {
+    float frequency = float(sampleCount) / 1000.0;  // in kHz
+    Serial.print("Frequency: ");
+    Serial.print(frequency, 3);
+    Serial.println(" kHz");
+
+    sampleCount = 0;
+    lastRatePrint = now;
+  }
+}
