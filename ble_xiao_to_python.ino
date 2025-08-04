@@ -5,22 +5,58 @@
 // IMU
 LSM6DS3 myIMU(I2C_MODE, 0x6A);
 
-// BLE Service & Characteristic
-BLEService imuService("180C");  // custom IMU service UUID
-BLEStringCharacteristic imuDataChar("2A56", BLERead | BLENotify, 64); // 64-byte buffer
+// BLE Service & Characteristics
+BLEService imuService("180C");
+BLEStringCharacteristic imuDataChar("2A56", BLERead | BLENotify, 200);  // Data notifications
+BLECharacteristic controlChar("12345678-1234-5678-1234-56789abcdef1", BLEWrite, 16); // Control commands
+
+// Config
+const int SAMPLES_PER_PACKET = 10; // Samples per BLE packet
+char packetBuffer[200];             // Buffer for batched data
+
+bool imuActive = false;             // Track IMU reading state
+
+const int LED_PIN = LED_BUILTIN;     // Built-in LED (or change to custom pin)
+
+// Event handler for BLE control commands
+void onControlWritten(BLEDevice central, BLECharacteristic characteristic) {
+  int length = characteristic.valueLength();
+  char buffer[17]; // 16 bytes max + null terminator
+  if (length > 16) length = 16;
+
+  memcpy(buffer, characteristic.value(), length);
+  buffer[length] = '\0';
+
+  String command = String(buffer);
+  command.trim();
+
+  if (command.equalsIgnoreCase("START")) {
+    imuActive = true;
+    digitalWrite(LED_PIN, HIGH);  // LED ON
+    Serial.println("Received START command - IMU active");
+  } 
+  else if (command.equalsIgnoreCase("STOP")) {
+    imuActive = false;
+    digitalWrite(LED_PIN, LOW);   // LED OFF
+    Serial.println("Received STOP command - IMU inactive");
+  }
+}
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   while (!Serial);
 
-  // Start IMU
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+
+  // Initialize IMU
   if (myIMU.begin() != 0) {
     Serial.println("IMU Device error");
-  } else {
-    Serial.println("IMU Device OK!");
+    while (1);
   }
+  Serial.println("IMU Device OK!");
 
-  // Start BLE
+  // Initialize BLE
   if (!BLE.begin()) {
     Serial.println("Starting BLE failed!");
     while (1);
@@ -31,9 +67,12 @@ void setup() {
   BLE.setAdvertisedService(imuService);
 
   imuService.addCharacteristic(imuDataChar);
+  imuService.addCharacteristic(controlChar);
   BLE.addService(imuService);
 
-  imuDataChar.writeValue("Waiting for data...");
+  controlChar.setEventHandler(BLEWritten, onControlWritten); // Attach handler
+
+  imuDataChar.writeValue("Waiting...");
   BLE.advertise();
 
   Serial.println("BLE Device Ready - Connect via LightBlue");
@@ -42,33 +81,41 @@ void setup() {
 void loop() {
   BLEDevice central = BLE.central();
 
-  if (central) { // connected
+  if (central) {
     Serial.print("Connected to central: ");
     Serial.println(central.address());
 
+    imuActive = false;
+    digitalWrite(LED_PIN, LOW); // Ensure LED is off initially
+
     while (central.connected()) {
-      // Read IMU data
-      float ax = myIMU.readFloatAccelX();
-      float ay = myIMU.readFloatAccelY();
-      float az = myIMU.readFloatAccelZ();
-      float gx = myIMU.readFloatGyroX();
-      float gy = myIMU.readFloatGyroY();
-      float gz = myIMU.readFloatGyroZ();
+      if (imuActive) {
+        // Collect batch of samples
+        packetBuffer[0] = '\0';
+        for (int i = 0; i < SAMPLES_PER_PACKET; i++) {
+          int16_t ax = myIMU.readRawAccelX();
+          int16_t ay = myIMU.readRawAccelY();
+          int16_t az = myIMU.readRawAccelZ();
+          int16_t gx = myIMU.readRawGyroX();
+          int16_t gy = myIMU.readRawGyroY();
+          int16_t gz = myIMU.readRawGyroZ();
 
-      // Create a compact string
-      char buffer[64];
-      snprintf(buffer, sizeof(buffer), "A:%.2f,%.2f,%.2f G:%.2f,%.2f,%.2f",
-               ax, ay, az, gx, gy, gz);
+          char sample[30];
+          snprintf(sample, sizeof(sample), "%d,%d,%d,%d,%d,%d;", ax, ay, az, gx, gy, gz);
+          strncat(packetBuffer, sample, sizeof(packetBuffer) - strlen(packetBuffer) - 1);
+        }
 
-      // Send over BLE
-      imuDataChar.writeValue(buffer);
+        imuDataChar.writeValue(packetBuffer);
+        Serial.println(packetBuffer);
 
-      // Debug on Serial
-      Serial.println(buffer);
-
-      delay(200); // update every 200ms
+        delay(10); // Adjust as needed
+      } else {
+        delay(100); // Idle delay when inactive
+      }
     }
 
     Serial.println("Disconnected from central");
+    imuActive = false;
+    digitalWrite(LED_PIN, LOW); // LED off when disconnected
   }
 }
