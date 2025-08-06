@@ -7,19 +7,19 @@ LSM6DS3 myIMU(I2C_MODE, 0x6A);
 
 // BLE Service & Characteristics
 BLEService imuService("180C");
-BLEStringCharacteristic imuDataChar("2A56", BLERead | BLENotify, 244);  // Max 244 bytes for BLE 5
+BLECharacteristic imuDataChar("2A56", BLERead | BLENotify, 244); // Binary data
 BLECharacteristic controlChar("12345678-1234-5678-1234-56789abcdef1", BLEWrite, 16);
 
 // Config
-const int SAMPLES_PER_PACKET = 12;  // Bigger batch due to larger MTU
-char packetBuffer[244];             // Increase to BLE 5 MTU size
+const int SAMPLES_PER_PACKET = 10;      // Adjust for MTU
 bool imuActive = false;
 
-// BLE 5 Configuration Parameters
-#define MIN_CONN_INTERVAL 6   // 7.5 ms (6 * 1.25ms)
+// BLE 5 Parameters
+#define MIN_CONN_INTERVAL 6   // 7.5 ms
 #define MAX_CONN_INTERVAL 12  // 15 ms
-#define SLAVE_LATENCY     0   // No latency for fast response
-#define SUPERVISION_TIMEOUT 400 // 4 seconds
+
+// Buffer for binary samples
+int16_t imuBuffer[SAMPLES_PER_PACKET][6]; // 6 values/sample
 
 void onControlWritten(BLEDevice central, BLECharacteristic characteristic) {
   int length = characteristic.valueLength();
@@ -59,10 +59,9 @@ void setup() {
     while (1);
   }
 
-  // BLE 5 optimizations
   BLE.setDeviceName("XIAO_IMU");
   BLE.setLocalName("XIAO_IMU");
-  BLE.setConnectionInterval(MIN_CONN_INTERVAL, MAX_CONN_INTERVAL);  
+  BLE.setConnectionInterval(MIN_CONN_INTERVAL, MAX_CONN_INTERVAL);
   BLE.setAdvertisedService(imuService);
 
   imuService.addCharacteristic(imuDataChar);
@@ -71,10 +70,10 @@ void setup() {
 
   controlChar.setEventHandler(BLEWritten, onControlWritten);
 
-  imuDataChar.writeValue("Waiting...");
+  imuDataChar.writeValue((uint8_t*)"WAIT", 4);
   BLE.advertise();
 
-  Serial.println("BLE 5 Device Ready - Connect via LightBlue");
+  Serial.println("BLE 5 Device Ready - Binary Mode");
 }
 
 void loop() {
@@ -88,24 +87,19 @@ void loop() {
 
     while (central.connected()) {
       if (imuActive) {
-        packetBuffer[0] = '\0';
         for (int i = 0; i < SAMPLES_PER_PACKET; i++) {
-          int16_t ax = myIMU.readRawAccelX();
-          int16_t ay = myIMU.readRawAccelY();
-          int16_t az = myIMU.readRawAccelZ();
-          int16_t gx = myIMU.readRawGyroX();
-          int16_t gy = myIMU.readRawGyroY();
-          int16_t gz = myIMU.readRawGyroZ();
-
-          char sample[30];
-          snprintf(sample, sizeof(sample), "%d,%d,%d,%d,%d,%d;", ax, ay, az, gx, gy, gz);
-          strncat(packetBuffer, sample, sizeof(packetBuffer) - strlen(packetBuffer) - 1);
+          imuBuffer[i][0] = myIMU.readRawAccelX();
+          imuBuffer[i][1] = myIMU.readRawAccelY();
+          imuBuffer[i][2] = myIMU.readRawAccelZ();
+          imuBuffer[i][3] = myIMU.readRawGyroX();
+          imuBuffer[i][4] = myIMU.readRawGyroY();
+          imuBuffer[i][5] = myIMU.readRawGyroZ();
         }
 
-        imuDataChar.writeValue(packetBuffer);  // Send BLE 5 packet
-        Serial.println(packetBuffer);
+        // Send raw bytes
+        imuDataChar.writeValue((uint8_t*)imuBuffer, sizeof(imuBuffer));
       } else {
-        delay(50); // Idle
+        delay(50);
       }
     }
 
