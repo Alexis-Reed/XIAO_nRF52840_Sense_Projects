@@ -11,43 +11,65 @@ BLEStringCharacteristic imuDataChar("2A56", BLERead | BLENotify, 200);  // Data 
 BLECharacteristic controlChar("12345678-1234-5678-1234-56789abcdef1", BLEWrite, 16); // Control commands
 
 // Config
-const int SAMPLES_PER_PACKET = 10; // Samples per BLE packet
-char packetBuffer[200];             // Buffer for batched data
+const int SAMPLES_PER_PACKET = 10;
+char packetBuffer[200];
 
-bool imuActive = false;             // Track IMU reading state
+bool imuActive = false;
 
-const int LED_PIN = LED_BUILTIN;     // Built-in LED (or change to custom pin)
+const int LED_PIN = LED_BUILTIN; // Built-in LED
+#define LED_ON  LOW   // XIAO's LED is active low
+#define LED_OFF HIGH
 
 // Event handler for BLE control commands
 void onControlWritten(BLEDevice central, BLECharacteristic characteristic) {
   int length = characteristic.valueLength();
-  char buffer[17]; // 16 bytes max + null terminator
+  const uint8_t* rawValue = characteristic.value();
+
+  // Make a safe buffer with null terminator
+  char commandBuffer[17]; // 16 max + null
   if (length > 16) length = 16;
+  memcpy(commandBuffer, rawValue, length);
+  commandBuffer[length] = '\0';
 
-  memcpy(buffer, characteristic.value(), length);
-  buffer[length] = '\0';
+  // Debug: print each byte
+  Serial.print("Raw command bytes: ");
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)rawValue[i]);
+    Serial.print(" ");
+  }
+  Serial.println();
 
-  String command = String(buffer);
+  // Debug: print parsed string
+  Serial.print("Parsed command: '");
+  Serial.print(commandBuffer);
+  Serial.println("'");
+
+  // Process commands
+  String command(commandBuffer);
   command.trim();
 
   if (command.equalsIgnoreCase("START")) {
     imuActive = true;
-    digitalWrite(LED_PIN, HIGH);  // LED ON
-    Serial.println("Received START command - IMU active");
+    digitalWrite(LED_PIN, LED_ON);
+    Serial.println("✅ IMU started - LED ON");
   } 
   else if (command.equalsIgnoreCase("STOP")) {
     imuActive = false;
-    digitalWrite(LED_PIN, LOW);   // LED OFF
-    Serial.println("Received STOP command - IMU inactive");
+    digitalWrite(LED_PIN, LED_OFF);
+    Serial.println("🛑 IMU stopped - LED OFF");
+  } 
+  else {
+    Serial.println("⚠️ Unknown command received");
   }
 }
+
 
 void setup() {
   Serial.begin(115200);
   while (!Serial);
 
   pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
+  digitalWrite(LED_PIN, LED_OFF); // Ensure LED is off at boot
 
   // Initialize IMU
   if (myIMU.begin() != 0) {
@@ -70,7 +92,7 @@ void setup() {
   imuService.addCharacteristic(controlChar);
   BLE.addService(imuService);
 
-  controlChar.setEventHandler(BLEWritten, onControlWritten); // Attach handler
+  controlChar.setEventHandler(BLEWritten, onControlWritten);
 
   imuDataChar.writeValue("Waiting...");
   BLE.advertise();
@@ -86,11 +108,10 @@ void loop() {
     Serial.println(central.address());
 
     imuActive = false;
-    digitalWrite(LED_PIN, LOW); // Ensure LED is off initially
+    digitalWrite(LED_PIN, LED_OFF);
 
     while (central.connected()) {
       if (imuActive) {
-        // Collect batch of samples
         packetBuffer[0] = '\0';
         for (int i = 0; i < SAMPLES_PER_PACKET; i++) {
           int16_t ax = myIMU.readRawAccelX();
@@ -108,14 +129,14 @@ void loop() {
         imuDataChar.writeValue(packetBuffer);
         Serial.println(packetBuffer);
 
-        delay(10); // Adjust as needed
+        delay(10);
       } else {
-        delay(100); // Idle delay when inactive
+        delay(100);
       }
     }
 
     Serial.println("Disconnected from central");
     imuActive = false;
-    digitalWrite(LED_PIN, LOW); // LED off when disconnected
+    digitalWrite(LED_PIN, LED_OFF);
   }
 }
