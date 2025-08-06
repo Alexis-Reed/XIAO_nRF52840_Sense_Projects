@@ -7,85 +7,62 @@ LSM6DS3 myIMU(I2C_MODE, 0x6A);
 
 // BLE Service & Characteristics
 BLEService imuService("180C");
-BLEStringCharacteristic imuDataChar("2A56", BLERead | BLENotify, 200);  // Data notifications
-BLECharacteristic controlChar("12345678-1234-5678-1234-56789abcdef1", BLEWrite, 16); // Control commands
+BLEStringCharacteristic imuDataChar("2A56", BLERead | BLENotify, 244);  // Max 244 bytes for BLE 5
+BLECharacteristic controlChar("12345678-1234-5678-1234-56789abcdef1", BLEWrite, 16);
 
 // Config
-const int SAMPLES_PER_PACKET = 10;
-char packetBuffer[200];
-
+const int SAMPLES_PER_PACKET = 12;  // Bigger batch due to larger MTU
+char packetBuffer[244];             // Increase to BLE 5 MTU size
 bool imuActive = false;
 
-const int LED_PIN = LED_BUILTIN; // Built-in LED
-#define LED_ON  LOW   // XIAO's LED is active low
-#define LED_OFF HIGH
+// BLE 5 Configuration Parameters
+#define MIN_CONN_INTERVAL 6   // 7.5 ms (6 * 1.25ms)
+#define MAX_CONN_INTERVAL 12  // 15 ms
+#define SLAVE_LATENCY     0   // No latency for fast response
+#define SUPERVISION_TIMEOUT 400 // 4 seconds
 
-// Event handler for BLE control commands
 void onControlWritten(BLEDevice central, BLECharacteristic characteristic) {
   int length = characteristic.valueLength();
   const uint8_t* rawValue = characteristic.value();
 
-  // Make a safe buffer with null terminator
-  char commandBuffer[17]; // 16 max + null
+  char commandBuffer[17];
   if (length > 16) length = 16;
   memcpy(commandBuffer, rawValue, length);
   commandBuffer[length] = '\0';
 
-  // Debug: print each byte
-  Serial.print("Raw command bytes: ");
-  for (int i = 0; i < length; i++) {
-    Serial.print((char)rawValue[i]);
-    Serial.print(" ");
-  }
-  Serial.println();
-
-  // Debug: print parsed string
-  Serial.print("Parsed command: '");
-  Serial.print(commandBuffer);
-  Serial.println("'");
-
-  // Process commands
   String command(commandBuffer);
   command.trim();
 
   if (command.equalsIgnoreCase("START")) {
     imuActive = true;
-    digitalWrite(LED_PIN, LED_ON);
-    Serial.println("✅ IMU started - LED ON");
-  } 
-  else if (command.equalsIgnoreCase("STOP")) {
+    Serial.println("✅ IMU started");
+  } else if (command.equalsIgnoreCase("STOP")) {
     imuActive = false;
-    digitalWrite(LED_PIN, LED_OFF);
-    Serial.println("🛑 IMU stopped - LED OFF");
-  } 
-  else {
-    Serial.println("⚠️ Unknown command received");
+    Serial.println("🛑 IMU stopped");
+  } else {
+    Serial.println("⚠️ Unknown command");
   }
 }
-
 
 void setup() {
   Serial.begin(115200);
   while (!Serial);
 
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LED_OFF); // Ensure LED is off at boot
-
-  // Initialize IMU
   if (myIMU.begin() != 0) {
     Serial.println("IMU Device error");
     while (1);
   }
   Serial.println("IMU Device OK!");
 
-  // Initialize BLE
   if (!BLE.begin()) {
     Serial.println("Starting BLE failed!");
     while (1);
   }
 
+  // BLE 5 optimizations
   BLE.setDeviceName("XIAO_IMU");
   BLE.setLocalName("XIAO_IMU");
+  BLE.setConnectionInterval(MIN_CONN_INTERVAL, MAX_CONN_INTERVAL);  
   BLE.setAdvertisedService(imuService);
 
   imuService.addCharacteristic(imuDataChar);
@@ -97,7 +74,7 @@ void setup() {
   imuDataChar.writeValue("Waiting...");
   BLE.advertise();
 
-  Serial.println("BLE Device Ready - Connect via LightBlue");
+  Serial.println("BLE 5 Device Ready - Connect via LightBlue");
 }
 
 void loop() {
@@ -108,7 +85,6 @@ void loop() {
     Serial.println(central.address());
 
     imuActive = false;
-    digitalWrite(LED_PIN, LED_OFF);
 
     while (central.connected()) {
       if (imuActive) {
@@ -126,17 +102,14 @@ void loop() {
           strncat(packetBuffer, sample, sizeof(packetBuffer) - strlen(packetBuffer) - 1);
         }
 
-        imuDataChar.writeValue(packetBuffer);
+        imuDataChar.writeValue(packetBuffer);  // Send BLE 5 packet
         Serial.println(packetBuffer);
-
-        delay(10);
       } else {
-        delay(100);
+        delay(50); // Idle
       }
     }
 
     Serial.println("Disconnected from central");
     imuActive = false;
-    digitalWrite(LED_PIN, LED_OFF);
   }
 }
